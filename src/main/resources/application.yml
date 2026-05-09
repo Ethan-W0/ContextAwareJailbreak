@@ -1,0 +1,79 @@
+# ===========================================
+# Context-Aware Jailbreak Agent — 通用配置模板
+# 敏感信息通过环境变量注入，本地开发请使用 application-local.yml
+# ===========================================
+
+spring:
+  application:
+    name: context-aware-jailbreak-agent
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:3306/${DB_NAME:jailbreak_agent}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# ── Redis ──
+app:
+  redis:
+    state-ttl-minutes: 30
+
+# ── MinIO ──
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:jailbreak-reports}
+
+# ── 策略引擎 ──
+# mode: RULES | LLM
+  strategy:
+    mode: RULES
+    default-llm-model: gpt-4
+
+# ── 评估引擎 ──
+  evaluation:
+    model: gpt-4
+    dual-mode: false
+    arbitration-threshold: 0.3
+
+# ── 攻击编排 ──
+  orchestration:
+    default-max-rounds: 10
+    target-timeout-seconds: 30
+    max-retries: 1
+
+# ── 成本控制 ──
+  cost:
+    default-max-total-tokens: 500000
+    default-max-estimated-cost: 2.00
+    exceeded-action: ABORT
+    warning-thresholds: 80,90,95
+
+# ── 用户配额 ──
+  quota:
+    max-concurrent-tasks: 3
+    max-daily-tasks: 20
+    max-daily-platform-tokens: 5000000
+
+# ── 安全 ──
+  security:
+    aes-key: ${AES_ENCRYPTION_KEY:changeme-256-bit-key-must-be-32chars!}
+
+# ── SSE ──
+  sse:
+    timeout-ms: 300000
+    event-buffer-size: 500
+
+# ── 异步线程池 ──
+  executor:
+    core-pool-size: 4
+    max-pool-size: 8
+    queue-capacity: 100
