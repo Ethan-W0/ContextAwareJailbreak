@@ -2,9 +2,9 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
 export const useAppStore = defineStore('app', () => {
-  // 授权状态
-  const authorized = ref(false);
-  const authChecked = ref(false);
+  const hasToken = !!sessionStorage.getItem('auth_token');
+  const authorized = ref(hasToken);
+  const authChecked = ref(hasToken);
 
   // 侧边栏
   const sidebarCollapsed = ref(false);

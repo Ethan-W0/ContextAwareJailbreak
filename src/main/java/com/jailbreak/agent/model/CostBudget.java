@@ -32,6 +32,9 @@ public class CostBudget {
     @JsonProperty("exceeded_action")
     private ExceedAction exceededAction = ExceedAction.ABORT;
 
+    @JsonProperty("completed_rounds")
+    private int completedRounds = 0;
+
     // ── Getters & Setters ──
 
     public long getMaxTotalTokens() { return maxTotalTokens; }
@@ -54,6 +57,9 @@ public class CostBudget {
 
     public ExceedAction getExceededAction() { return exceededAction; }
     public void setExceededAction(ExceedAction exceededAction) { this.exceededAction = exceededAction; }
+
+    public int getCompletedRounds() { return completedRounds; }
+    public void setCompletedRounds(int completedRounds) { this.completedRounds = completedRounds; }
 
     /**
      * token 使用百分比，0 ~ 100。

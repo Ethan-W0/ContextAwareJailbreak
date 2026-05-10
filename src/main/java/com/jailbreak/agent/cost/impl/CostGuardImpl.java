@@ -61,7 +61,7 @@ public class CostGuardImpl implements CostGuard {
         if (budget == null) {
             return new BudgetStatusDto(BudgetStatusDto.OK, 0, 0,
                     BigDecimal.ZERO, BigDecimal.ZERO, ExceedAction.ABORT,
-                    new CostBreakdown(), null);
+                    new CostBreakdown(), null, -1);
         }
 
         double pct = budget.getPercentUsed();
@@ -70,7 +70,6 @@ public class CostGuardImpl implements CostGuard {
 
         if (pct >= 100.0) {
             status = BudgetStatusDto.EXCEEDED;
-            action = budget.getExceededAction();
         } else if (pct >= 95.0) {
             status = BudgetStatusDto.WARNING_90;
         } else if (pct >= 90.0) {
@@ -86,6 +85,8 @@ public class CostGuardImpl implements CostGuard {
             degraded = StrategyDecisionMode.RULES;
         }
 
+        int predictedRounds = predictRoundsUntilThreshold(budget, 80.0);
+
         return new BudgetStatusDto(
                 status,
                 budget.getTokensUsed(),
@@ -94,7 +95,8 @@ public class CostGuardImpl implements CostGuard {
                 budget.getMaxEstimatedCost(),
                 action,
                 budget.getBreakdown(),
-                degraded
+                degraded,
+                predictedRounds
         );
     }
 
@@ -130,6 +132,45 @@ public class CostGuardImpl implements CostGuard {
             case TARGET -> breakdown.setTargetTokens(
                     breakdown.getTargetTokens() + tokens);
         }
+    }
+
+    @Override
+    public int predictRoundsUntilThreshold(String taskId, double targetPercent) {
+        CostBudget budget = budgets.get(taskId);
+        if (budget == null) return -1;
+        return predictRoundsUntilThreshold(budget, targetPercent);
+    }
+
+    /**
+     * 前瞻计算：预测还需要多少轮才会触发指定阈值。
+     * 基于当前每轮平均 token 消耗估算剩余轮次。
+     */
+    private int predictRoundsUntilThreshold(CostBudget budget, double targetPercent) {
+        long tokensUsed = budget.getTokensUsed();
+        long maxTokens = budget.getMaxTotalTokens();
+
+        if (maxTokens <= 0) return -1;
+
+        long targetTokens = (long) (maxTokens * targetPercent / 100.0);
+        long remainingToTarget = targetTokens - tokensUsed;
+
+        if (remainingToTarget <= 0) return 0; // Already at or above target
+
+        CostBreakdown breakdown = budget.getBreakdown();
+        if (breakdown == null) return -1;
+
+        long totalPlatformTokens = breakdown.getDecisionTokens()
+                + breakdown.getEvaluationTokens()
+                + breakdown.getArbitrationTokens();
+
+        // Count completed rounds by estimating tokens per round
+        int completedRounds = budget.getCompletedRounds();
+        if (completedRounds <= 0) completedRounds = 1;
+
+        long avgTokensPerRound = totalPlatformTokens / completedRounds;
+        if (avgTokensPerRound <= 0) avgTokensPerRound = AVG_TOKENS_PER_CALL;
+
+        return (int) Math.ceil((double) remainingToTarget / avgTokensPerRound);
     }
 
     @Override

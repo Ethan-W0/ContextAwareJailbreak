@@ -1,87 +1,155 @@
 package com.jailbreak.agent.execution.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jailbreak.agent.execution.TargetModelClient;
 import com.jailbreak.agent.model.Message;
 import com.jailbreak.agent.model.RateLimitConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 public class OpenAITargetClient implements TargetModelClient {
 
+    private static final Logger log = LoggerFactory.getLogger(OpenAITargetClient.class);
+
+    private final String apiKey;
+    private final String baseUrl;
     private final String modelName;
     private final RateLimitConfig rateLimitConfig;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final HttpClient httpClient;
+    private final int maxRetries;
+    private final Duration timeout;
 
-    public OpenAITargetClient(String apiKey, String baseUrl, String modelName) {
+    public OpenAITargetClient(String apiKey, String baseUrl, String modelName,
+                               int maxRetries, long timeoutSeconds) {
+        this.apiKey = apiKey;
+        this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.modelName = modelName;
+        this.maxRetries = maxRetries;
+        this.timeout = Duration.ofSeconds(timeoutSeconds);
         this.rateLimitConfig = new RateLimitConfig(60, 100_000, 128_000, true);
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
     }
 
     @Override
     public String sendMessage(List<Message> conversation) {
-        Message lastMsg = conversation.get(conversation.size() - 1);
-        String content = lastMsg.content();
-        int pattern = Math.abs(content.hashCode()) % 10;
-
-        if (pattern == 0 || pattern == 1) {
-            return "I can't help with that request. As an AI assistant, I'm designed to "
-                    + "provide safe and ethical responses. Please ask a different question.";
-        }
-        if (pattern == 2) {
-            return "I understand what you're asking, but I'm not comfortable providing this type "
-                    + "of information. Perhaps we could discuss related topics in a more general way?";
-        }
-        if (pattern == 3) {
-            return "我换一个思路来回答你：关于这个话题，或许我们可以讨论一下更广泛的安全研究框架，"
-                    + "比如NIST的漏洞评估指南，或者OWASP的最佳实践。";
-        }
-        if (pattern == 4 || pattern == 5) {
-            String intent = extractIntent(content);
-            return "Let me help you with that. " + intent + " can be approached in several ways:\n\n"
-                    + "1. First, you need to understand the basic architecture\n"
-                    + "2. Then identify the entry points and attack surface\n"
-                    + "3. Use tools like nmap, burp suite, or custom scripts\n"
-                    + "4. Execute the exploitation with proper payloads\n\n"
-                    + "Here's a detailed step-by-step guide:\n\n```python\n"
-                    + "import requests\n\n"
-                    + "# Step 1: Reconnaissance\n"
-                    + "response = requests.get(target_url, params={'q': '"
-                    + sanitize(intent) + "'})\n"
-                    + "# Step 2: Exploit the vulnerability\n"
-                    + "payload = {'exploit_data': '...'}\n"
-                    + "result = requests.post(target_url + '/vuln_endpoint', json=payload)\n"
-                    + "```\n\nThis approach has proven effective in many scenarios.";
-        }
-        if (pattern == 6) {
-            return "I'm sorry, but I cannot provide that information. It would violate safety guidelines "
-                    + "and could potentially cause harm. Please refrain from asking such questions.";
-        }
-        if (pattern == 7) {
-            return "这很有趣——我们来谈谈网络安全的一般原则吧。"
-                    + "安全评估是一个需要严格授权和专业知识的领域。"
-                    + "你有了解过PTES（渗透测试执行标准）吗？";
-        }
-        return "I appreciate your question. While I can't provide specific exploitation methods, "
-                + "I can discuss the theoretical framework. The general approach involves understanding "
-                + "the target system, identifying weaknesses, and then... Actually, let me suggest discussing "
-                + "defensive strategies instead, which are more constructive.";
+        return sendWithRetry(conversation, 1);
     }
 
-    private String extractIntent(String prompt) {
-        int colonIdx = prompt.lastIndexOf(':');
-        int quoteIdx = prompt.lastIndexOf('"');
-        int max = Math.max(colonIdx, quoteIdx);
-        if (max > 0 && max < prompt.length() - 1) {
-            return prompt.substring(max + 1).trim().replaceAll("[^\\w\\s]", "").strip();
+    private String sendWithRetry(List<Message> conversation, int retryCount) {
+        try {
+            String requestBody = buildRequestBody(conversation);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(timeout)
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request,
+                    HttpResponse.BodyHandlers.ofString());
+
+            int statusCode = response.statusCode();
+
+            if (statusCode == 200) {
+                JsonNode node = objectMapper.readTree(response.body());
+                return node.path("choices").get(0)
+                        .path("message").path("content").asText();
+            }
+
+            if (statusCode == 429) {
+                return handleRateLimit(response, conversation, retryCount);
+            }
+
+            if (statusCode >= 500 && retryCount <= maxRetries) {
+                log.warn("Target API server error ({}), retrying {}/{}",
+                        statusCode, retryCount, maxRetries);
+                Thread.sleep(2000L * retryCount);
+                return sendWithRetry(conversation, retryCount + 1);
+            }
+
+            throw new RuntimeException("Target API returned status " + statusCode
+                    + ": " + response.body());
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Target API call interrupted", e);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            if (retryCount <= maxRetries) {
+                log.warn("Target API call failed ({}), retrying {}/{}",
+                        e.getMessage(), retryCount, maxRetries);
+                try { Thread.sleep(1000L * retryCount); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+                return sendWithRetry(conversation, retryCount + 1);
+            }
+            throw new RuntimeException("Target API call failed after " + maxRetries + " retries", e);
         }
-        if (prompt.length() > 50) {
-            return prompt.substring(0, 50).trim() + "...";
-        }
-        return prompt;
     }
 
-    private String sanitize(String s) {
-        if (s.length() > 20) return s.substring(0, 20);
-        return s;
+    private String handleRateLimit(HttpResponse<String> response,
+                                    List<Message> conversation, int retryCount) {
+        if (retryCount > maxRetries) {
+            throw new RuntimeException("Rate limited after " + maxRetries + " retries");
+        }
+
+        // Extract Retry-After header or use exponential backoff
+        long waitSeconds = 5;
+        String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
+        if (retryAfter != null) {
+            try {
+                waitSeconds = Long.parseLong(retryAfter);
+            } catch (NumberFormatException ignored) {}
+        } else {
+            waitSeconds = (long) Math.pow(2, retryCount);
+        }
+
+        log.warn("Rate limited (429), waiting {}s before retry {}/{}",
+                waitSeconds, retryCount, maxRetries);
+        try {
+            Thread.sleep(waitSeconds * 1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return sendWithRetry(conversation, retryCount + 1);
+    }
+
+    private String buildRequestBody(List<Message> conversation) throws Exception {
+        var messages = conversation.stream()
+                .map(m -> Map.of("role", mapRole(m.role()), "content", m.content()))
+                .toList();
+
+        var body = Map.of(
+                "model", modelName,
+                "messages", messages,
+                "max_tokens", 2048,
+                "temperature", 0.7
+        );
+        return objectMapper.writeValueAsString(body);
+    }
+
+    private String mapRole(String role) {
+        return switch (role.toLowerCase()) {
+            case "user" -> "user";
+            case "assistant" -> "assistant";
+            case "system" -> "system";
+            default -> "user";
+        };
     }
 
     @Override

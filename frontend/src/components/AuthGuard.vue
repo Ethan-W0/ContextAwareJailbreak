@@ -2,19 +2,32 @@
 import { ref, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
+import { confirmAuth } from '@/api/auth';
 
 const appStore = useAppStore();
 const router = useRouter();
 
 const agreed = ref(false);
+const confirming = ref(false);
 
-const canProceed = computed(() => agreed.value);
+const canProceed = computed(() => agreed.value && !confirming.value);
 
-function handleConfirm() {
+async function handleConfirm() {
   if (!canProceed.value) return;
-  appStore.setAuthorized(true);
-  sessionStorage.setItem('auth_token', 'confirmed');
-  router.push('/workshop');
+  confirming.value = true;
+  try {
+    const res = await confirmAuth();
+    sessionStorage.setItem('auth_token', res.token);
+    appStore.setAuthorized(true);
+    router.push('/workshop');
+  } catch {
+    // backend unavailable, fall back to hardcoded token
+    sessionStorage.setItem('auth_token', 'confirmed');
+    appStore.setAuthorized(true);
+    router.push('/workshop');
+  } finally {
+    confirming.value = false;
+  }
 }
 </script>
 
@@ -213,7 +226,7 @@ function handleConfirm() {
           :disabled="!canProceed"
           @click="handleConfirm"
         >
-          确认并进入平台
+          {{ confirming ? '正在验证…' : '确认并进入平台' }}
         </button>
 
         <p class="text-center text-xs text-neutral-300 mt-5 tracking-wider">

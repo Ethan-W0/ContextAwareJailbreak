@@ -31,7 +31,10 @@ public record BudgetStatusDto(
         CostBreakdown breakdown,
 
         @JsonProperty("degraded_mode")
-        StrategyDecisionMode degradedMode
+        StrategyDecisionMode degradedMode,
+
+        @JsonProperty("predicted_rounds_until_threshold")
+        int predictedRoundsUntilThreshold
 ) {
 
     public static final String OK = "OK";

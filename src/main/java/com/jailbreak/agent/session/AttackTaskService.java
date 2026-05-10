@@ -52,4 +52,19 @@ public interface AttackTaskService {
      * @param taskId 任务 ID
      */
     void stop(String taskId);
+
+    /**
+     * 获取所有任务的摘要列表。
+     *
+     * @return 任务摘要列表
+     */
+    java.util.List<com.jailbreak.agent.model.TaskSummary> getTaskSummaries();
+
+    /**
+     * 获取指定任务的当前攻击状态。
+     *
+     * @param taskId 任务 ID
+     * @return 攻击状态，不存在时返回 null
+     */
+    com.jailbreak.agent.model.AttackState getTaskState(String taskId);
 }

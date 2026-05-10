@@ -21,7 +21,7 @@ public class AuthorizationInterceptorImpl implements AuthorizationInterceptor {
 
         try {
             response.setStatus(403);
-            response.setContentType("application/json");
+            response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write(
                     "{\"error\":\"Unauthorized\",\"message\":\"请先完成授权确认\"}");
             response.getWriter().flush();
@@ -34,13 +34,20 @@ public class AuthorizationInterceptorImpl implements AuthorizationInterceptor {
         String token = UUID.randomUUID().toString();
         String ip = request.getRemoteAddr();
         tokens.put(token, ip);
+        request.getSession().setAttribute(AUTH_SESSION_KEY, true);
         return token;
     }
 
     @Override
     public boolean isAuthorized(HttpServletRequest request) {
-        String token = request.getHeader(AUTH_HEADER);
-        if (token != null && tokens.containsKey(token)) return true;
+        String xtoken = request.getHeader(AUTH_HEADER);
+        if (xtoken == null) {
+            String authHeader = request.getHeader("Authorization");
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                xtoken = authHeader.substring(7);
+            }
+        }
+        if (xtoken != null && tokens.containsKey(xtoken)) return true;
 
         var session = request.getSession(false);
         if (session != null) {

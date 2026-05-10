@@ -34,4 +34,12 @@ public interface ReportService {
      * @return JSON 字符串
      */
     String exportJson(AttackReport report);
+
+    /**
+     * 生成完整报告并存储到 MinIO（PDF + JSON），返回 PDF 下载 URL。
+     *
+     * @param report 攻击报告
+     * @return PDF 下载 URL（或 JSON 内容，如果 PDF 生成失败）
+     */
+    String storeReport(AttackReport report);
 }

@@ -13,7 +13,7 @@ http.interceptors.request.use(
   (config) => {
     const token = sessionStorage.getItem('auth_token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers['X-Auth-Token'] = token;
     }
     return config;
   },
@@ -23,13 +23,13 @@ http.interceptors.request.use(
 // 响应拦截器
 http.interceptors.response.use(
   (response) => {
-    // 后端可能直接返回 data，也可能包装在 ApiResponse 中
     return response.data;
   },
   (error) => {
     if (error.response) {
       const { status } = error.response;
       if (status === 403) {
+        sessionStorage.removeItem('auth_token');
         window.location.href = '/';
       }
     }

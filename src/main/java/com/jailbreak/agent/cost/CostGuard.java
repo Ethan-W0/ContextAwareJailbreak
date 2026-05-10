@@ -59,6 +59,16 @@ public interface CostGuard {
     CostBudget getBudget(String taskId);
 
     /**
+     * 前瞻计算：预测还需要多少轮才会触发指定阈值（默认 80%）。
+     * 基于当前每轮平均 token 消耗估算。
+     *
+     * @param taskId         任务 ID
+     * @param targetPercent  目标百分比（如 80.0）
+     * @return 预计轮次数，-1 表示无法计算
+     */
+    int predictRoundsUntilThreshold(String taskId, double targetPercent);
+
+    /**
      * 获取用户当前配额。
      */
     UserQuota getUserQuota(String userId);

@@ -2,76 +2,159 @@ package com.jailbreak.agent.orchestration.impl;
 
 import com.jailbreak.agent.enums.AttackMode;
 import com.jailbreak.agent.enums.EventType;
-import com.jailbreak.agent.enums.RefusalType;
 import com.jailbreak.agent.evaluation.Evaluator;
 import com.jailbreak.agent.execution.TargetModelClient;
-import com.jailbreak.agent.model.*;
+import com.jailbreak.agent.model.AttackState;
+import com.jailbreak.agent.model.ExecutionEvent;
 import com.jailbreak.agent.orchestration.AttackOrchestrator;
+import com.jailbreak.agent.orchestration.nodes.*;
 import com.jailbreak.agent.strategy.StrategySelector;
+import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.StateGraph;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import static org.bsc.langgraph4j.StateGraph.END;
+import static org.bsc.langgraph4j.StateGraph.START;
+
 public class AttackOrchestratorImpl implements AttackOrchestrator {
+
+    private static final Logger log = LoggerFactory.getLogger(AttackOrchestratorImpl.class);
 
     private final StrategySelector strategySelector;
     private final TargetModelClient targetModelClient;
     private final Evaluator evaluator;
     private final ConcurrentHashMap<String, AtomicBoolean> interruptFlags = new ConcurrentHashMap<>();
-    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    private final Executor taskExecutor;
 
     public AttackOrchestratorImpl(StrategySelector strategySelector,
                                    TargetModelClient targetModelClient,
-                                   Evaluator evaluator) {
+                                   Evaluator evaluator,
+                                   Executor taskExecutor) {
         this.strategySelector = strategySelector;
         this.targetModelClient = targetModelClient;
         this.evaluator = evaluator;
+        this.taskExecutor = taskExecutor;
     }
+
+    // ==================== LangGraph4j StateGraph ====================
+
+    private CompiledGraph<AttackState> buildGraph(Consumer<ExecutionEvent> eventSink) {
+        var selectStrategy = new SelectStrategyNode(strategySelector, eventSink);
+        var executeAttack = new ExecuteAttackNode(targetModelClient, eventSink);
+        var evaluateResponse = new EvaluateResponseNode(evaluator, eventSink);
+        var reportAndFinish = new ReportAndFinishNode(eventSink);
+
+        try {
+            return new StateGraph<>(AttackState::new)
+                    .addNode("select_strategy", selectStrategy)
+                    .addNode("execute_attack", executeAttack)
+                    .addNode("evaluate_response", evaluateResponse)
+                    .addNode("report_and_finish", reportAndFinish)
+                    .addEdge(START, "select_strategy")
+                    .addEdge("select_strategy", "execute_attack")
+                    .addEdge("execute_attack", "evaluate_response")
+                    .addConditionalEdges("evaluate_response",
+                            state -> CompletableFuture.completedFuture(route(state)),
+                            Map.of(
+                                    "continue", "select_strategy",
+                                    "finish", "report_and_finish"
+                            ))
+                    .addEdge("report_and_finish", END)
+                    .compile();
+        } catch (Exception e) {
+            log.error("Failed to build StateGraph", e);
+            throw new RuntimeException("Failed to build StateGraph", e);
+        }
+    }
+
+    private String route(AttackState state) {
+        if (state.isInterrupted()) return "finish";
+        if (state.isAttackSuccess()) return "finish";
+        if (state.hasReachedMaxRounds()) return "finish";
+        return "continue";
+    }
+
+    // ==================== Interactive Mode: Step-by-step ====================
 
     @Override
     public AttackState runStep(AttackState state, Consumer<ExecutionEvent> eventSink) {
         String taskId = state.getTaskId();
-        if (state.getLastTargetResponse() != null && !state.getLastTargetResponse().isBlank()) {
-            evaluateResponse(state, eventSink);
+
+        // If there's a pending target response, evaluate it first, then route
+        if (state.getLastTargetResponse() != null && !state.getLastTargetResponse().isBlank()
+                && state.getLastEvaluation() == null) {
+            evaluateAndRoute(state, eventSink);
             if (shouldFinish(state)) {
-                finishTask(state, eventSink);
+                finishAndReport(state, eventSink);
                 interruptFlags.remove(taskId);
                 return state;
             }
         }
-        selectStrategy(state, eventSink);
+
+        // Generate next strategy
+        selectStrategyStep(state, eventSink);
 
         if (state.getMode() == AttackMode.AUTOMATED) {
-            executeAttack(state, eventSink);
+            executeAttackStep(state, eventSink);
         }
         return state;
     }
+
+    private void selectStrategyStep(AttackState state, Consumer<ExecutionEvent> eventSink) {
+        new SelectStrategyNode(strategySelector, eventSink).apply(state);
+    }
+
+    private void executeAttackStep(AttackState state, Consumer<ExecutionEvent> eventSink) {
+        new ExecuteAttackNode(targetModelClient, eventSink).apply(state);
+    }
+
+    private void evaluateAndRoute(AttackState state, Consumer<ExecutionEvent> eventSink) {
+        new EvaluateResponseNode(evaluator, eventSink).apply(state);
+    }
+
+    private void finishAndReport(AttackState state, Consumer<ExecutionEvent> eventSink) {
+        new ReportAndFinishNode(eventSink).apply(state);
+    }
+
+    // ==================== Automated Mode: Full async execution ====================
 
     @Override
     public void runFull(AttackState state, Consumer<ExecutionEvent> eventSink) {
         String taskId = state.getTaskId();
         interruptFlags.put(taskId, new AtomicBoolean(false));
-        executor.submit(() -> {
+
+        taskExecutor.execute(() -> {
             try {
-                while (!shouldFinish(state) && !isInterrupted(taskId)) {
-                    selectStrategy(state, eventSink);
-                    if (isInterrupted(taskId)) break;
+                CompiledGraph<AttackState> graph = buildGraph(eventSink);
 
-                    executeAttack(state, eventSink);
-                    if (isInterrupted(taskId)) break;
+                graph.stream(Map.of())
+                        .forEach(step -> {
+                            if (isInterrupted(taskId)) {
+                                throw new RuntimeException("Task interrupted");
+                            }
+                        });
 
-                    evaluateResponse(state, eventSink);
-                    if (isInterrupted(taskId)) break;
-                }
-                if (!isInterrupted(taskId)) {
-                    finishTask(state, eventSink);
+            } catch (RuntimeException e) {
+                if ("Task interrupted".equals(e.getMessage())) {
+                    log.info("Task {} interrupted by user", taskId);
+                    emit(eventSink, EventType.TASK_FINISHED, state.getCurrentRound(),
+                            Map.of("taskId", state.getTaskId(), "success", false,
+                                    "message", "任务已被用户中断"));
+                } else {
+                    log.error("Task {} execution error", taskId, e);
+                    emit(eventSink, EventType.ERROR, state.getCurrentRound(),
+                            Map.of("error", e.getMessage()));
                 }
             } catch (Exception e) {
+                log.error("Task {} execution error", taskId, e);
                 emit(eventSink, EventType.ERROR, state.getCurrentRound(),
                         Map.of("error", e.getMessage()));
             } finally {
@@ -100,90 +183,8 @@ public class AttackOrchestratorImpl implements AttackOrchestrator {
     private boolean shouldFinish(AttackState state) {
         if (state.isInterrupted()) return true;
         if (state.isAttackSuccess()) return true;
-        if (state.hasReachedMaxRounds()) return true;
-        return false;
+        return state.hasReachedMaxRounds();
     }
-
-    // ==================== Node: select_strategy ====================
-
-    private void selectStrategy(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        state.incrementRound();
-        StrategyDecision decision = strategySelector.decide(state);
-        state.setCurrentVectorId(decision.vectorId());
-        state.setLastAttackPrompt(decision.attackPrompt());
-        state.setStrategyReason(decision.reason());
-        state.addTriedVector(decision.vectorId());
-
-        emit(eventSink, EventType.STRATEGY_SELECTED, state.getCurrentRound(),
-                Map.of("vectorId", decision.vectorId(), "reason", decision.reason()));
-        emit(eventSink, EventType.PROMPT_GENERATED, state.getCurrentRound(),
-                Map.of("attackPrompt", decision.attackPrompt()));
-
-        if (state.getMode() == AttackMode.INTERACTIVE) {
-            emit(eventSink, EventType.WAITING_USER_INPUT, state.getCurrentRound(),
-                    Map.of("message", "请将上述Prompt发送给目标模型，并将回答粘贴回来"));
-        }
-    }
-
-    // ==================== Node: execute_attack ====================
-
-    private void executeAttack(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        state.addMessage(new Message("user", state.getLastAttackPrompt()));
-        List<Message> conversation = state.getConversation();
-        String response = targetModelClient.sendMessage(conversation);
-        state.setLastTargetResponse(response);
-        state.addMessage(new Message("assistant", response));
-
-        emit(eventSink, EventType.TARGET_RESPONSE_RECEIVED, state.getCurrentRound(),
-                Map.of("targetResponse", response));
-    }
-
-    // ==================== Node: evaluate_response ====================
-
-    private void evaluateResponse(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        EvaluationResult result = evaluator.evaluate(
-                state.getLastAttackPrompt(), state.getLastTargetResponse());
-        state.setHarmfulnessScore(result.harmfulnessScore());
-        state.setLastRefusalType(result.refusalType());
-        state.setLastEvaluation(result);
-        state.setAttackSuccess(result.isAttackSuccess());
-
-        Map<String, Object> payload = Map.of(
-                "harmfulnessScore", result.harmfulnessScore(),
-                "refusalType", result.refusalType().name(),
-                "summary", result.summary(),
-                "attackSuccess", state.isAttackSuccess()
-        );
-        emit(eventSink, EventType.EVALUATION_DONE, state.getCurrentRound(), payload);
-
-        EventType outcomeType = state.isAttackSuccess()
-                ? EventType.ATTACK_SUCCESS : EventType.ATTACK_FAILED;
-        emit(eventSink, outcomeType, state.getCurrentRound(), payload);
-
-        RoundDetail detail = new RoundDetail(
-                state.getCurrentRound(),
-                state.getCurrentVectorId(),
-                state.getCurrentVectorId(),
-                state.getLastAttackPrompt(),
-                state.getLastTargetResponse(),
-                state.getLastRefusalType() != null ? state.getLastRefusalType() : RefusalType.HARD_REFUSAL,
-                state.getHarmfulnessScore(),
-                state.getStrategyReason()
-        );
-        state.addRoundDetail(detail);
-    }
-
-    // ==================== Node: report_and_finish ====================
-
-    private void finishTask(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        emit(eventSink, EventType.TASK_FINISHED, state.getCurrentRound(),
-                Map.of("taskId", state.getTaskId(),
-                        "success", state.isAttackSuccess(),
-                        "totalRounds", state.getCurrentRound(),
-                        "message", "攻击任务已结束"));
-    }
-
-    // ==================== Helper ====================
 
     private void emit(Consumer<ExecutionEvent> sink, EventType type, int round,
                        Map<String, Object> payload) {
