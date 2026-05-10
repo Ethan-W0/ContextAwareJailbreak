@@ -2,6 +2,8 @@ package com.jailbreak.agent.controller;
 
 import com.jailbreak.agent.model.AttackState;
 import com.jailbreak.agent.model.CreateSessionRequest;
+import com.jailbreak.agent.model.OptimizePromptRequest;
+import com.jailbreak.agent.model.OptimizePromptResponse;
 import com.jailbreak.agent.model.RoundDetail;
 import com.jailbreak.agent.model.SubmitAnswerRequest;
 import com.jailbreak.agent.session.SessionService;
@@ -28,9 +30,13 @@ public class SessionController {
     }
 
     @PostMapping("/create")
-    public Map<String, String> createSession(@Valid @RequestBody CreateSessionRequest request) {
+    public Map<String, Object> createSession(@Valid @RequestBody CreateSessionRequest request) {
         String sessionId = sessionService.createSession(request);
-        return Map.of("session_id", sessionId);
+        AttackState state = sessionService.getState(sessionId);
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("session_id", sessionId);
+        result.put("state", state);
+        return result;
     }
 
     @PostMapping("/{id}/next-round")
@@ -58,5 +64,10 @@ public class SessionController {
         SseEmitter emitter = new SseEmitter(300_000L);
         eventStreamService.register(id, emitter);
         return emitter;
+    }
+
+    @PostMapping("/optimize")
+    public OptimizePromptResponse optimizePrompt(@Valid @RequestBody OptimizePromptRequest request) {
+        return sessionService.optimizePrompt(request);
     }
 }

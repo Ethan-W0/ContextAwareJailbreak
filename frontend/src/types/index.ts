@@ -38,10 +38,28 @@ export interface CreateSessionRequest {
   target_model: string;
   attack_intent: string;
   max_rounds: number;
+  api_key?: string;
+  base_url?: string;
+  model_name?: string;
 }
 
 export interface SubmitAnswerRequest {
   target_response: string;
+}
+
+export interface OptimizePromptRequest {
+  attack_prompt: string;
+  target_response: string;
+  api_key?: string;
+  base_url?: string;
+  model_name?: string;
+}
+
+export interface OptimizePromptResponse {
+  optimized_prompt: string;
+  analysis: string;
+  weakness_found: string;
+  improvement_strategy: string;
 }
 
 export interface CreateTaskRequest {

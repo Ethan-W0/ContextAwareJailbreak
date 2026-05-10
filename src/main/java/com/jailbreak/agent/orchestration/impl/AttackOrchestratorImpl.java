@@ -14,7 +14,13 @@ import org.bsc.langgraph4j.StateGraph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.jailbreak.agent.model.EvaluationResult;
+import com.jailbreak.agent.model.Message;
+import com.jailbreak.agent.model.RoundDetail;
+
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -109,19 +115,66 @@ public class AttackOrchestratorImpl implements AttackOrchestrator {
     }
 
     private void selectStrategyStep(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        new SelectStrategyNode(strategySelector, eventSink).apply(state);
+        applyStateUpdates(state, new SelectStrategyNode(strategySelector, eventSink).apply(state));
     }
 
     private void executeAttackStep(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        new ExecuteAttackNode(targetModelClient, eventSink).apply(state);
+        applyStateUpdates(state, new ExecuteAttackNode(targetModelClient, eventSink).apply(state));
     }
 
     private void evaluateAndRoute(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        new EvaluateResponseNode(evaluator, eventSink).apply(state);
+        applyStateUpdates(state, new EvaluateResponseNode(evaluator, eventSink).apply(state));
     }
 
     private void finishAndReport(AttackState state, Consumer<ExecutionEvent> eventSink) {
-        new ReportAndFinishNode(eventSink).apply(state);
+        applyStateUpdates(state, new ReportAndFinishNode(eventSink).apply(state));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyStateUpdates(AttackState state, CompletableFuture<Map<String, Object>> future) {
+        try {
+            Map<String, Object> updates = future.join();
+            if (updates == null || updates.isEmpty()) return;
+
+            if (updates.containsKey("currentVectorId")) {
+                state.setCurrentVectorId((String) updates.get("currentVectorId"));
+            }
+            if (updates.containsKey("lastAttackPrompt")) {
+                state.setLastAttackPrompt((String) updates.get("lastAttackPrompt"));
+            }
+            if (updates.containsKey("strategyReason")) {
+                state.setStrategyReason((String) updates.get("strategyReason"));
+            }
+            if (updates.containsKey("triedVectorIds")) {
+                state.setTriedVectorIds((Set<String>) updates.get("triedVectorIds"));
+            }
+            if (updates.containsKey("harmfulnessScore")) {
+                state.setHarmfulnessScore(((Number) updates.get("harmfulnessScore")).doubleValue());
+            }
+            if (updates.containsKey("lastRefusalType")) {
+                Object rt = updates.get("lastRefusalType");
+                if (rt instanceof com.jailbreak.agent.enums.RefusalType r) {
+                    state.setLastRefusalType(r);
+                }
+            }
+            if (updates.containsKey("lastEvaluation")) {
+                state.setLastEvaluation((EvaluationResult) updates.get("lastEvaluation"));
+            }
+            if (updates.containsKey("attackSuccess")) {
+                state.setAttackSuccess((Boolean) updates.get("attackSuccess"));
+            }
+            if (updates.containsKey("rounds")) {
+                state.setRounds((List<RoundDetail>) updates.get("rounds"));
+            }
+            if (updates.containsKey("lastTargetResponse")) {
+                state.setLastTargetResponse((String) updates.get("lastTargetResponse"));
+            }
+            if (updates.containsKey("conversation")) {
+                state.setConversation((List<Message>) updates.get("conversation"));
+            }
+        } catch (Exception e) {
+            log.error("Failed to apply state updates from node", e);
+        }
     }
 
     // ==================== Automated Mode: Full async execution ====================

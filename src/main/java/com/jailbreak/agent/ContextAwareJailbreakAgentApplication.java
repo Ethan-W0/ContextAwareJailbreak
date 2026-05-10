@@ -22,7 +22,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 横切关注点: 成本控制引擎 — {@code cost}
  */
 @SpringBootApplication
-public class ContextAwareJailbreakAgentApplication {
+public class     ContextAwareJailbreakAgentApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(ContextAwareJailbreakAgentApplication.class, args);

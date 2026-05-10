@@ -32,7 +32,7 @@ const router = useRouter();
             交互式攻击工坊
           </h3>
           <p class="text-sm text-primary-400 leading-relaxed">
-            Agent 生成越狱 Prompt，你手动粘贴到目标模型，逐步观察模型反应与评估结果。
+            创建会话，Agent 生成越狱 Prompt，你手动测试后粘贴回答，Agent 评估并迭代优化。
           </p>
         </button>
 

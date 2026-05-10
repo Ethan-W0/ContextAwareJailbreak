@@ -4,6 +4,7 @@ import com.jailbreak.agent.enums.EventType;
 import com.jailbreak.agent.execution.TargetModelClient;
 import com.jailbreak.agent.model.AttackState;
 import com.jailbreak.agent.model.ExecutionEvent;
+import com.jailbreak.agent.model.LLMConfig;
 import com.jailbreak.agent.model.Message;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
 
@@ -28,7 +29,9 @@ public class ExecuteAttackNode implements AsyncNodeAction<AttackState> {
         state.addMessage(new Message("user", state.getLastAttackPrompt()));
         List<Message> conversation = new ArrayList<>(state.getConversation());
 
-        String response = targetClient.sendMessage(conversation);
+        LLMConfig llmConfig = new LLMConfig(
+                state.getApiKey(), state.getBaseUrl(), state.getModelName());
+        String response = targetClient.sendMessage(conversation, llmConfig);
 
         state.addMessage(new Message("assistant", response));
 

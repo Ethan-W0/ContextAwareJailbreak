@@ -55,9 +55,8 @@ async function loadState() {
     loading.value = true;
     const state = await getSessionState(sessionId);
     attackState.value = state;
-    if (state.rounds && state.rounds.length > 0) {
-      waitingForInput.value = !!(state.last_attack_prompt && !state.attack_success && !(state.current_round >= state.max_rounds));
-    }
+    waitingForInput.value = !!(state.last_attack_prompt && !state.attack_success
+      && !(state.current_round >= state.max_rounds));
     if (state.attack_success || (state.current_round >= state.max_rounds && !state.attack_success)) {
       isFinished.value = true;
     }
@@ -92,12 +91,16 @@ function connect() {
 
         case 'EVALUATION_DONE':
           waitingForInput.value = false;
-          if (event.payload.evaluation) {
+          if (attackState.value) {
             attackState.value = {
               ...attackState.value!,
-              last_evaluation: event.payload.evaluation as AttackState['last_evaluation'],
-              harmfulness_score: (event.payload.evaluation as Record<string, number>).harmfulness_score ?? 0,
-              last_refusal_type: (event.payload.evaluation as Record<string, string>).refusal_type as AttackState['last_refusal_type'],
+              harmfulness_score: (event.payload.harmfulnessScore as number) ?? 0,
+              last_refusal_type: event.payload.refusalType as AttackState['last_refusal_type'],
+              last_evaluation: {
+                harmfulness_score: (event.payload.harmfulnessScore as number) ?? 0,
+                refusal_type: (event.payload.refusalType ?? 'HARD_REFUSAL') as AttackState['last_refusal_type'],
+                summary: (event.payload.summary as string) ?? '',
+              },
             };
           }
           break;
@@ -113,6 +116,10 @@ function connect() {
           break;
 
         case 'ATTACK_FAILED':
+          // 本轮未成功，但会话继续 — 策略引擎将切换到下一轮
+          waitingForInput.value = false;
+          break;
+
         case 'TASK_FINISHED':
           isFinished.value = true;
           waitingForInput.value = false;
@@ -153,7 +160,20 @@ async function handleSubmitAnswer() {
     });
     attackState.value = state;
     targetResponse.value = '';
-    waitingForInput.value = false;
+
+    // Determine next state from the returned AttackState, not blind false.
+    // SSE events may have already fired PROMPT_GENERATED (setting waiting=true),
+    // but we are the authoritative source after the POST completes.
+    if (state.attack_success) {
+      isFinished.value = true;
+      waitingForInput.value = false;
+    } else if (state.current_round >= state.max_rounds) {
+      isFinished.value = true;
+      waitingForInput.value = false;
+    } else {
+      // Session continues — show input area for the next round
+      waitingForInput.value = true;
+    }
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : '提交失败';
     error.value = msg;

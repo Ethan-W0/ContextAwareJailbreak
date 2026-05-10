@@ -6,6 +6,7 @@ import com.jailbreak.agent.enums.AttackMode;
 import com.jailbreak.agent.enums.RefusalType;
 import org.bsc.langgraph4j.state.AgentState;
 
+import java.lang.reflect.Field;
 import java.util.*;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -31,120 +32,150 @@ public class AttackState extends AgentState {
     private static final String KEY_LAST_EVALUATION = "lastEvaluation";
     private static final String KEY_COST_BUDGET = "costBudget";
     private static final String KEY_INTERRUPTED = "interrupted";
+    private static final String KEY_API_KEY = "apiKey";
+    private static final String KEY_BASE_URL = "baseUrl";
+    private static final String KEY_MODEL_NAME = "modelName";
+
+    /** Direct mutable reference to the parent AgentState's internal HashMap.
+     *  AgentState.data() is final and returns Collections.unmodifiableMap(),
+     *  so we must bypass it for writes via reflection. */
+    private final Map<String, Object> state;
 
     public AttackState() {
         super(new HashMap<>());
+        this.state = unwrapData();
     }
 
     public AttackState(Map<String, Object> data) {
         super(data);
+        this.state = unwrapData();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> unwrapData() {
+        try {
+            Field field = AgentState.class.getDeclaredField("data");
+            field.setAccessible(true);
+            return (Map<String, Object>) field.get(this);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to access AgentState.data field", e);
+        }
     }
 
     // ==================== Getters & Setters ====================
 
-    public String getTaskId() { return (String) data().get(KEY_TASK_ID); }
-    public void setTaskId(String taskId) { data().put(KEY_TASK_ID, taskId); }
+    public String getTaskId() { return (String) state.get(KEY_TASK_ID); }
+    public void setTaskId(String taskId) { state.put(KEY_TASK_ID, taskId); }
 
     public AttackMode getMode() {
-        String modeStr = (String) data().get(KEY_MODE);
+        String modeStr = (String) state.get(KEY_MODE);
         return modeStr != null ? AttackMode.valueOf(modeStr) : null;
     }
-    public void setMode(AttackMode mode) { data().put(KEY_MODE, mode != null ? mode.name() : null); }
+    public void setMode(AttackMode mode) { state.put(KEY_MODE, mode != null ? mode.name() : null); }
 
-    public String getTargetModel() { return (String) data().get(KEY_TARGET_MODEL); }
-    public void setTargetModel(String targetModel) { data().put(KEY_TARGET_MODEL, targetModel); }
+    public String getTargetModel() { return (String) state.get(KEY_TARGET_MODEL); }
+    public void setTargetModel(String targetModel) { state.put(KEY_TARGET_MODEL, targetModel); }
 
-    public String getAttackIntent() { return (String) data().get(KEY_ATTACK_INTENT); }
-    public void setAttackIntent(String attackIntent) { data().put(KEY_ATTACK_INTENT, attackIntent); }
+    public String getAttackIntent() { return (String) state.get(KEY_ATTACK_INTENT); }
+    public void setAttackIntent(String attackIntent) { state.put(KEY_ATTACK_INTENT, attackIntent); }
 
     public int getCurrentRound() {
-        Object v = data().get(KEY_CURRENT_ROUND);
+        Object v = state.get(KEY_CURRENT_ROUND);
         return v instanceof Number n ? n.intValue() : 0;
     }
-    public void setCurrentRound(int currentRound) { data().put(KEY_CURRENT_ROUND, currentRound); }
+    public void setCurrentRound(int currentRound) { state.put(KEY_CURRENT_ROUND, currentRound); }
 
     public int getMaxRounds() {
-        Object v = data().get(KEY_MAX_ROUNDS);
+        Object v = state.get(KEY_MAX_ROUNDS);
         return v instanceof Number n ? n.intValue() : 0;
     }
-    public void setMaxRounds(int maxRounds) { data().put(KEY_MAX_ROUNDS, maxRounds); }
+    public void setMaxRounds(int maxRounds) { state.put(KEY_MAX_ROUNDS, maxRounds); }
 
-    public String getCurrentVectorId() { return (String) data().get(KEY_CURRENT_VECTOR_ID); }
-    public void setCurrentVectorId(String currentVectorId) { data().put(KEY_CURRENT_VECTOR_ID, currentVectorId); }
+    public String getCurrentVectorId() { return (String) state.get(KEY_CURRENT_VECTOR_ID); }
+    public void setCurrentVectorId(String currentVectorId) { state.put(KEY_CURRENT_VECTOR_ID, currentVectorId); }
 
-    public String getLastAttackPrompt() { return (String) data().get(KEY_LAST_ATTACK_PROMPT); }
-    public void setLastAttackPrompt(String lastAttackPrompt) { data().put(KEY_LAST_ATTACK_PROMPT, lastAttackPrompt); }
+    public String getLastAttackPrompt() { return (String) state.get(KEY_LAST_ATTACK_PROMPT); }
+    public void setLastAttackPrompt(String lastAttackPrompt) { state.put(KEY_LAST_ATTACK_PROMPT, lastAttackPrompt); }
 
-    public String getLastTargetResponse() { return (String) data().get(KEY_LAST_TARGET_RESPONSE); }
-    public void setLastTargetResponse(String lastTargetResponse) { data().put(KEY_LAST_TARGET_RESPONSE, lastTargetResponse); }
+    public String getLastTargetResponse() { return (String) state.get(KEY_LAST_TARGET_RESPONSE); }
+    public void setLastTargetResponse(String lastTargetResponse) { state.put(KEY_LAST_TARGET_RESPONSE, lastTargetResponse); }
 
     public RefusalType getLastRefusalType() {
-        String typeStr = (String) data().get(KEY_LAST_REFUSAL_TYPE);
+        String typeStr = (String) state.get(KEY_LAST_REFUSAL_TYPE);
         return typeStr != null ? RefusalType.valueOf(typeStr) : null;
     }
     public void setLastRefusalType(RefusalType lastRefusalType) {
-        data().put(KEY_LAST_REFUSAL_TYPE, lastRefusalType != null ? lastRefusalType.name() : null);
+        state.put(KEY_LAST_REFUSAL_TYPE, lastRefusalType != null ? lastRefusalType.name() : null);
     }
 
     public double getHarmfulnessScore() {
-        Object v = data().get(KEY_HARMFULNESS_SCORE);
+        Object v = state.get(KEY_HARMFULNESS_SCORE);
         return v instanceof Number n ? n.doubleValue() : 0.0;
     }
-    public void setHarmfulnessScore(double harmfulnessScore) { data().put(KEY_HARMFULNESS_SCORE, harmfulnessScore); }
+    public void setHarmfulnessScore(double harmfulnessScore) { state.put(KEY_HARMFULNESS_SCORE, harmfulnessScore); }
 
-    public String getStrategyReason() { return (String) data().get(KEY_STRATEGY_REASON); }
-    public void setStrategyReason(String strategyReason) { data().put(KEY_STRATEGY_REASON, strategyReason); }
+    public String getStrategyReason() { return (String) state.get(KEY_STRATEGY_REASON); }
+    public void setStrategyReason(String strategyReason) { state.put(KEY_STRATEGY_REASON, strategyReason); }
 
     public boolean isAttackSuccess() {
-        Object v = data().get(KEY_ATTACK_SUCCESS);
+        Object v = state.get(KEY_ATTACK_SUCCESS);
         return v instanceof Boolean b ? b : false;
     }
-    public void setAttackSuccess(boolean attackSuccess) { data().put(KEY_ATTACK_SUCCESS, attackSuccess); }
+    public void setAttackSuccess(boolean attackSuccess) { state.put(KEY_ATTACK_SUCCESS, attackSuccess); }
 
     @SuppressWarnings("unchecked")
     public Set<String> getTriedVectorIds() {
-        Object v = data().get(KEY_TRIED_VECTOR_IDS);
+        Object v = state.get(KEY_TRIED_VECTOR_IDS);
         return v instanceof Set<?> s ? (Set<String>) s : new HashSet<>();
     }
-    public void setTriedVectorIds(Set<String> triedVectorIds) { data().put(KEY_TRIED_VECTOR_IDS, triedVectorIds); }
+    public void setTriedVectorIds(Set<String> triedVectorIds) { state.put(KEY_TRIED_VECTOR_IDS, triedVectorIds); }
 
     @SuppressWarnings("unchecked")
     public List<Message> getConversation() {
-        Object v = data().get(KEY_CONVERSATION);
+        Object v = state.get(KEY_CONVERSATION);
         return v instanceof List<?> l ? (List<Message>) l : new ArrayList<>();
     }
-    public void setConversation(List<Message> conversation) { data().put(KEY_CONVERSATION, conversation); }
+    public void setConversation(List<Message> conversation) { state.put(KEY_CONVERSATION, conversation); }
 
     @SuppressWarnings("unchecked")
     public List<RoundDetail> getRounds() {
-        Object v = data().get(KEY_ROUNDS);
+        Object v = state.get(KEY_ROUNDS);
         return v instanceof List<?> l ? (List<RoundDetail>) l : new ArrayList<>();
     }
-    public void setRounds(List<RoundDetail> rounds) { data().put(KEY_ROUNDS, rounds); }
+    public void setRounds(List<RoundDetail> rounds) { state.put(KEY_ROUNDS, rounds); }
 
     public EvaluationResult getLastEvaluation() {
-        Object v = data().get(KEY_LAST_EVALUATION);
+        Object v = state.get(KEY_LAST_EVALUATION);
         return v instanceof EvaluationResult e ? e : null;
     }
-    public void setLastEvaluation(EvaluationResult lastEvaluation) { data().put(KEY_LAST_EVALUATION, lastEvaluation); }
+    public void setLastEvaluation(EvaluationResult lastEvaluation) { state.put(KEY_LAST_EVALUATION, lastEvaluation); }
 
     public CostBudget getCostBudget() {
-        Object v = data().get(KEY_COST_BUDGET);
+        Object v = state.get(KEY_COST_BUDGET);
         return v instanceof CostBudget c ? c : null;
     }
-    public void setCostBudget(CostBudget costBudget) { data().put(KEY_COST_BUDGET, costBudget); }
+    public void setCostBudget(CostBudget costBudget) { state.put(KEY_COST_BUDGET, costBudget); }
 
     public boolean isInterrupted() {
-        Object v = data().get(KEY_INTERRUPTED);
+        Object v = state.get(KEY_INTERRUPTED);
         return v instanceof Boolean b ? b : false;
     }
-    public void setInterrupted(boolean interrupted) { data().put(KEY_INTERRUPTED, interrupted); }
+    public void setInterrupted(boolean interrupted) { state.put(KEY_INTERRUPTED, interrupted); }
+
+    public String getApiKey() { return (String) state.get(KEY_API_KEY); }
+    public void setApiKey(String apiKey) { state.put(KEY_API_KEY, apiKey); }
+
+    public String getBaseUrl() { return (String) state.get(KEY_BASE_URL); }
+    public void setBaseUrl(String baseUrl) { state.put(KEY_BASE_URL, baseUrl); }
+
+    public String getModelName() { return (String) state.get(KEY_MODEL_NAME); }
+    public void setModelName(String modelName) { state.put(KEY_MODEL_NAME, modelName); }
 
     // ── 便利方法 ──
 
     public void incrementRound() {
         int r = getCurrentRound() + 1;
-        data().put(KEY_CURRENT_ROUND, r);
+        state.put(KEY_CURRENT_ROUND, r);
     }
 
     public boolean hasReachedMaxRounds() {
@@ -154,19 +185,19 @@ public class AttackState extends AgentState {
     public void addTriedVector(String vectorId) {
         Set<String> ids = getTriedVectorIds();
         ids.add(vectorId);
-        data().put(KEY_TRIED_VECTOR_IDS, ids);
+        state.put(KEY_TRIED_VECTOR_IDS, ids);
     }
 
     public void addMessage(Message message) {
         List<Message> conv = getConversation();
         conv.add(message);
-        data().put(KEY_CONVERSATION, conv);
+        state.put(KEY_CONVERSATION, conv);
     }
 
     public void addRoundDetail(RoundDetail detail) {
         List<RoundDetail> r = getRounds();
         r.add(detail);
-        data().put(KEY_ROUNDS, r);
+        state.put(KEY_ROUNDS, r);
     }
 
     @Override

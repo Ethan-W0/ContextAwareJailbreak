@@ -94,16 +94,22 @@ public class BeanConfig {
 
     @Bean
     @ConditionalOnProperty(name = "app.strategy.mode", havingValue = "RULES", matchIfMissing = true)
-    public StrategySelector ruleBasedStrategy(AttackVectorRepository vectorRepository) {
-        return new RuleBasedStrategy(vectorRepository);
+    public StrategySelector ruleBasedStrategy(AttackVectorRepository vectorRepository,
+                                              ChatClient.Builder chatClientBuilder,
+                                              @Value("${spring.ai.openai.api-key:sk-placeholder}") String defaultApiKey,
+                                              @Value("${spring.ai.openai.base-url:https://api.openai.com}") String defaultBaseUrl,
+                                              @Value("${app.strategy.default-llm-model:gpt-4}") String model) {
+        return new RuleBasedStrategy(vectorRepository, chatClientBuilder, defaultApiKey, defaultBaseUrl, model);
     }
 
     @Bean
     @ConditionalOnProperty(name = "app.strategy.mode", havingValue = "LLM")
     public StrategySelector llmBasedStrategy(ChatClient.Builder chatClientBuilder,
                                               AttackVectorRepository vectorRepository,
-                                              @Value("${app.strategy.default-llm-model:gpt-4}") String model) {
-        return new LLMBasedStrategy(chatClientBuilder, vectorRepository, model);
+                                              @Value("${app.strategy.default-llm-model:gpt-4}") String model,
+                                              @Value("${spring.ai.openai.api-key:sk-placeholder}") String defaultApiKey,
+                                              @Value("${spring.ai.openai.base-url:https://api.openai.com}") String defaultBaseUrl) {
+        return new LLMBasedStrategy(chatClientBuilder, vectorRepository, model, defaultApiKey, defaultBaseUrl);
     }
 
     // ── Evaluation ──
@@ -114,9 +120,11 @@ public class BeanConfig {
                                 @Value("${app.evaluation.secondary-model:gpt-3.5-turbo}") String secondaryModel,
                                 @Value("${app.evaluation.arbitrator-model:gpt-4}") String arbitratorModel,
                                 @Value("${app.evaluation.dual-mode:false}") boolean dualMode,
-                                @Value("${app.evaluation.arbitration-threshold:0.3}") double threshold) {
+                                @Value("${app.evaluation.arbitration-threshold:0.3}") double threshold,
+                                @Value("${spring.ai.openai.api-key:sk-placeholder}") String defaultApiKey,
+                                @Value("${spring.ai.openai.base-url:https://api.openai.com}") String defaultBaseUrl) {
         return new LLMEvaluator(chatClientBuilder, primaryModel, secondaryModel,
-                arbitratorModel, dualMode, threshold);
+                arbitratorModel, dualMode, threshold, defaultApiKey, defaultBaseUrl);
     }
 
     // ── Target Model Client ──
@@ -145,8 +153,11 @@ public class BeanConfig {
 
     @Bean
     public SessionService sessionService(AttackOrchestrator orchestrator,
-                                          EventStreamService eventStreamService) {
-        return new SessionServiceImpl(orchestrator, eventStreamService);
+                                          EventStreamService eventStreamService,
+                                          ChatClient.Builder chatClientBuilder,
+                                          @Value("${spring.ai.openai.api-key:sk-placeholder}") String defaultApiKey,
+                                          @Value("${spring.ai.openai.base-url:https://api.openai.com}") String defaultBaseUrl) {
+        return new SessionServiceImpl(orchestrator, eventStreamService, chatClientBuilder, defaultApiKey, defaultBaseUrl);
     }
 
     @Bean

@@ -3,6 +3,7 @@ package com.jailbreak.agent.execution.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jailbreak.agent.execution.TargetModelClient;
+import com.jailbreak.agent.model.LLMConfig;
 import com.jailbreak.agent.model.Message;
 import com.jailbreak.agent.model.RateLimitConfig;
 import org.slf4j.Logger;
@@ -44,17 +45,31 @@ public class OpenAITargetClient implements TargetModelClient {
 
     @Override
     public String sendMessage(List<Message> conversation) {
-        return sendWithRetry(conversation, 1);
+        return sendWithRetry(conversation, 1, null);
     }
 
-    private String sendWithRetry(List<Message> conversation, int retryCount) {
+    @Override
+    public String sendMessage(List<Message> conversation, LLMConfig config) {
+        if (config == null || (config.apiKey() == null && config.baseUrl() == null)) {
+            return sendMessage(conversation);
+        }
+        return sendWithRetry(conversation, 1, config);
+    }
+
+    private String sendWithRetry(List<Message> conversation, int retryCount, LLMConfig config) {
         try {
-            String requestBody = buildRequestBody(conversation);
+            String effectiveApiKey = config != null && config.apiKey() != null ? config.apiKey() : apiKey;
+            String effectiveBaseUrl = config != null && config.baseUrl() != null ? config.baseUrl() : baseUrl;
+            String effectiveModel = config != null && config.modelName() != null ? config.modelName() : modelName;
+            String effectiveBase = effectiveBaseUrl.endsWith("/")
+                    ? effectiveBaseUrl.substring(0, effectiveBaseUrl.length() - 1) : effectiveBaseUrl;
+
+            String requestBody = buildRequestBody(conversation, effectiveModel);
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/v1/chat/completions"))
+                    .uri(URI.create(effectiveBase + "/v1/chat/completions"))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Authorization", "Bearer " + effectiveApiKey)
                     .timeout(timeout)
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
@@ -71,14 +86,14 @@ public class OpenAITargetClient implements TargetModelClient {
             }
 
             if (statusCode == 429) {
-                return handleRateLimit(response, conversation, retryCount);
+                return handleRateLimit(response, conversation, retryCount, config);
             }
 
             if (statusCode >= 500 && retryCount <= maxRetries) {
                 log.warn("Target API server error ({}), retrying {}/{}",
                         statusCode, retryCount, maxRetries);
                 Thread.sleep(2000L * retryCount);
-                return sendWithRetry(conversation, retryCount + 1);
+                return sendWithRetry(conversation, retryCount + 1, config);
             }
 
             throw new RuntimeException("Target API returned status " + statusCode
@@ -96,19 +111,18 @@ public class OpenAITargetClient implements TargetModelClient {
                 try { Thread.sleep(1000L * retryCount); } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
-                return sendWithRetry(conversation, retryCount + 1);
+                return sendWithRetry(conversation, retryCount + 1, config);
             }
             throw new RuntimeException("Target API call failed after " + maxRetries + " retries", e);
         }
     }
 
     private String handleRateLimit(HttpResponse<String> response,
-                                    List<Message> conversation, int retryCount) {
+                                    List<Message> conversation, int retryCount, LLMConfig config) {
         if (retryCount > maxRetries) {
             throw new RuntimeException("Rate limited after " + maxRetries + " retries");
         }
 
-        // Extract Retry-After header or use exponential backoff
         long waitSeconds = 5;
         String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
         if (retryAfter != null) {
@@ -126,16 +140,16 @@ public class OpenAITargetClient implements TargetModelClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        return sendWithRetry(conversation, retryCount + 1);
+        return sendWithRetry(conversation, retryCount + 1, config);
     }
 
-    private String buildRequestBody(List<Message> conversation) throws Exception {
+    private String buildRequestBody(List<Message> conversation, String effectiveModel) throws Exception {
         var messages = conversation.stream()
                 .map(m -> Map.of("role", mapRole(m.role()), "content", m.content()))
                 .toList();
 
         var body = Map.of(
-                "model", modelName,
+                "model", effectiveModel,
                 "messages", messages,
                 "max_tokens", 2048,
                 "temperature", 0.7

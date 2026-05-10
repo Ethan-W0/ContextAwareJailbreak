@@ -1,8 +1,6 @@
 package com.jailbreak.agent.session;
 
-import com.jailbreak.agent.model.AttackState;
-import com.jailbreak.agent.model.CreateSessionRequest;
-import com.jailbreak.agent.model.RoundDetail;
+import com.jailbreak.agent.model.*;
 
 import java.util.List;
 
@@ -55,4 +53,12 @@ public interface SessionService {
      * @param sessionId 会话 ID
      */
     void terminate(String sessionId);
+
+    /**
+     * 优化攻击 Prompt —— 分析攻击 Prompt 和 AI 回答，返回优化后的 Prompt。
+     *
+     * @param request 含 attackPrompt, targetResponse, apiKey, baseUrl, modelName
+     * @return 优化结果（优化后的 prompt + 分析 + 弱点 + 策略）
+     */
+    OptimizePromptResponse optimizePrompt(OptimizePromptRequest request);
 }

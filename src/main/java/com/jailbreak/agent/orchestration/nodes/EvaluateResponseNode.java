@@ -23,8 +23,10 @@ public class EvaluateResponseNode implements AsyncNodeAction<AttackState> {
 
     @Override
     public CompletableFuture<Map<String, Object>> apply(AttackState state) {
+        LLMConfig llmConfig = new LLMConfig(
+                state.getApiKey(), state.getBaseUrl(), state.getModelName());
         EvaluationResult result = evaluator.evaluate(
-                state.getLastAttackPrompt(), state.getLastTargetResponse());
+                state.getLastAttackPrompt(), state.getLastTargetResponse(), llmConfig);
 
         boolean success = result.isAttackSuccess();
 

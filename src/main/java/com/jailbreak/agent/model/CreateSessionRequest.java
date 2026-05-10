@@ -19,5 +19,14 @@ public record CreateSessionRequest(
 
         @Min(1)
         @JsonProperty("max_rounds")
-        int maxRounds
+        int maxRounds,
+
+        @JsonProperty("api_key")
+        String apiKey,
+
+        @JsonProperty("base_url")
+        String baseUrl,
+
+        @JsonProperty("model_name")
+        String modelName
 ) {}
